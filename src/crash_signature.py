@@ -129,7 +129,7 @@ def plot_crash_metrics(summaries, names, tail_key=None):
 
 def load_tree_summary(path):
     """
-    Load a single crash tree summary JSON produced by Person B.
+    Load a single crash tree summary JSON produced
     """
     path = Path(path)
     with path.open("r") as f:
