@@ -73,6 +73,7 @@ def plot_binomial_tree_lattice(
     lattice: Tuple[List[List[LatticeNode]], List[Tuple[LatticeNode, LatticeNode]]],
     S0: float,
     out_path: str,
+    title: str | None = None,
 ) -> None:
     """
     Plot lattice nodes and edges, using log-price on y to keep spacing reasonable.
@@ -100,7 +101,10 @@ def plot_binomial_tree_lattice(
     ax.axhline(np.log(S0), color="black", linestyle="--", linewidth=1, label="log S0")
     ax.set_xlabel("Step")
     ax.set_ylabel("log Price")
-    ax.set_title("Local-vol binomial lattice")
+    if title:
+        ax.set_title(title)
+    else:
+        ax.set_title("Local-vol binomial lattice")
     ax.legend()
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)

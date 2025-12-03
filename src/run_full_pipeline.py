@@ -114,7 +114,10 @@ def plot_person2_outputs(crash_vol_path: Path = CRASH_VOL_FILE, out_dir: Path = 
             S0, DEFAULT_R, T_years, DEFAULT_N_STEPS, sigma_of_m
         )
         plot_binomial_tree_lattice(
-            lattice, S0, out_path=str(out_dir / f"crash{crash_id}_lattice.png")
+            lattice,
+            S0,
+            out_path=str(out_dir / f"crash{crash_id}_lattice.png"),
+            title=f"Crash {crash_id} lattice",
         )
 
 
@@ -231,8 +234,6 @@ def compare_model_realized(
                 "std_ret": s["std"],
                 "skew_ret": s["skew"],
                 "kurt_ret": s.get("kurtosis"),
-                "var_ret": s.get("VaR_5pct"),
-                "cvar_ret": s.get("CVaR_5pct"),
             },
             "realized": real,
         }
@@ -242,10 +243,10 @@ def compare_model_realized(
                 "crash": s["crash_id"],
                 "model_tail": record["model"]["tail_prob"],
                 "real_tail": real["tail_prob"],
-                "model_var": record["model"]["var_ret"],
-                "real_var": real["var_ret"],
-                "model_cvar": record["model"]["cvar_ret"],
-                "real_cvar": real["cvar_ret"],
+                "model_skew": record["model"]["skew_ret"],
+                "real_skew": real["skew_ret"],
+                "model_vol": record["model"]["std_ret"],
+                "real_vol": real["std_ret"],
             }
         )
 
@@ -269,17 +270,17 @@ def compare_model_realized(
         axes[0].set_xticklabels(df_plot["crash"])
         axes[0].legend()
 
-        # VaR
-        axes[1].bar(x - width / 2, df_plot["model_var"], width, label="Model")
-        axes[1].bar(x + width / 2, df_plot["real_var"], width, label="Realized")
-        axes[1].set_title("VaR 5% (returns)")
+        # Skew
+        axes[1].bar(x - width / 2, df_plot["model_skew"], width, label="Model")
+        axes[1].bar(x + width / 2, df_plot["real_skew"], width, label="Realized")
+        axes[1].set_title("Skew (returns)")
         axes[1].set_xticks(x)
         axes[1].set_xticklabels(df_plot["crash"])
 
-        # CVaR
-        axes[2].bar(x - width / 2, df_plot["model_cvar"], width, label="Model")
-        axes[2].bar(x + width / 2, df_plot["real_cvar"], width, label="Realized")
-        axes[2].set_title("CVaR 5% (returns)")
+        # Volatility (std)
+        axes[2].bar(x - width / 2, df_plot["model_vol"], width, label="Model")
+        axes[2].bar(x + width / 2, df_plot["real_vol"], width, label="Realized")
+        axes[2].set_title("Volatility (std of returns)")
         axes[2].set_xticks(x)
         axes[2].set_xticklabels(df_plot["crash"])
 
