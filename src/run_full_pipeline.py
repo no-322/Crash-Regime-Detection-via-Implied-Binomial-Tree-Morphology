@@ -47,6 +47,7 @@ P3_PLOTS = PLOTS_DIR / "person3"
 VERIFICATION_FILE = RESULTS_DIR / "model_vs_realized.json"
 CLASSIFICATION_FILE = RESULTS_DIR / "crash3_classification.json"
 PRECRASH_FILE = RESULTS_DIR / "crash3_precrash_predictions.json"
+VERIFICATION_PLOT = PLOTS_DIR / "model_vs_realized.png"
 
 
 def run_person_a() -> None:
@@ -207,6 +208,7 @@ def compare_model_realized(
     summaries: List[Dict[str, Any]],
     realized: Dict[int, Dict[str, float]],
     out_path: Path = VERIFICATION_FILE,
+    plot_path: Path = VERIFICATION_PLOT,
 ) -> Optional[Path]:
     """
     Compare model vs realized metrics for each crash and write JSON.
@@ -215,6 +217,7 @@ def compare_model_realized(
         return None
 
     records = []
+    plot_rows = []
     for s in summaries:
         cid = int(str(s["crash_id"]).replace("Crash", ""))
         real = realized.get(cid)
@@ -234,11 +237,58 @@ def compare_model_realized(
             "realized": real,
         }
         records.append(record)
+        plot_rows.append(
+            {
+                "crash": s["crash_id"],
+                "model_tail": record["model"]["tail_prob"],
+                "real_tail": real["tail_prob"],
+                "model_var": record["model"]["var_ret"],
+                "real_var": real["var_ret"],
+                "model_cvar": record["model"]["cvar_ret"],
+                "real_cvar": real["cvar_ret"],
+            }
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w") as f:
         json.dump(records, f, indent=2)
     print(f"Wrote model vs realized verification to {out_path}")
+
+    # Plot comparison bars if we have data
+    if plot_rows:
+        df_plot = pd.DataFrame(plot_rows)
+        x = np.arange(len(df_plot))
+        width = 0.35
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+        # Tail prob
+        axes[0].bar(x - width / 2, df_plot["model_tail"], width, label="Model")
+        axes[0].bar(x + width / 2, df_plot["real_tail"], width, label="Realized")
+        axes[0].set_title("Tail prob (<0.8 S0)")
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels(df_plot["crash"])
+        axes[0].legend()
+
+        # VaR
+        axes[1].bar(x - width / 2, df_plot["model_var"], width, label="Model")
+        axes[1].bar(x + width / 2, df_plot["real_var"], width, label="Realized")
+        axes[1].set_title("VaR 5% (returns)")
+        axes[1].set_xticks(x)
+        axes[1].set_xticklabels(df_plot["crash"])
+
+        # CVaR
+        axes[2].bar(x - width / 2, df_plot["model_cvar"], width, label="Model")
+        axes[2].bar(x + width / 2, df_plot["real_cvar"], width, label="Realized")
+        axes[2].set_title("CVaR 5% (returns)")
+        axes[2].set_xticks(x)
+        axes[2].set_xticklabels(df_plot["crash"])
+
+        fig.tight_layout()
+        plot_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        print(f"Wrote model vs realized plot to {plot_path}")
+
     return out_path
 
 
