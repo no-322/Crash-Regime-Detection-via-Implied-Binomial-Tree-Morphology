@@ -43,9 +43,34 @@ def build_crash_signature(summary1, summary2, tail_key=None):
     Build a crash signature from two crash summaries.
 
     By default, uses tail_prob_<0.8S0 in the dict (infer tail_key).
+    We set thresholds conservatively:
+      - tail_thresh = min(tail1, tail2) (require at least the smaller tail mass)
+      - skew_thresh = min(skew1, skew2) (require skew no higher than the more negative)
     """
     if tail_key is None:
         # auto-detect key like 'tail_prob_<0.8S0'
+        tail_keys = [k for k in summary1.keys() if k.startswith("tail_prob_<")]
+        if len(tail_keys) != 1:
+            raise ValueError("Ambiguous tail key, please pass tail_key explicitly")
+        tail_key = tail_keys[0]
+
+    tail1 = summary1[tail_key]
+    tail2 = summary2[tail_key]
+    skew1 = summary1["skew"]
+    skew2 = summary2["skew"]
+
+    return {
+        "tail_key": tail_key,
+        "tail_thresh": min(tail1, tail2),
+        "skew_thresh": min(skew1, skew2),  # more negative (or smaller) skew
+    }
+
+
+def build_crash_signature_loose(summary1, summary2, tail_key=None):
+    """
+    Legacy/looser signature: use averages of tail/skew from crash 1 and 2.
+    """
+    if tail_key is None:
         tail_keys = [k for k in summary1.keys() if k.startswith("tail_prob_<")]
         if len(tail_keys) != 1:
             raise ValueError("Ambiguous tail key, please pass tail_key explicitly")
@@ -79,9 +104,36 @@ def classify_crash(summary, signature):
     score = tail_diff + skew_diff
 
     # Heuristic classification rule:
+    # Require tail at least the signature minimum and skew no higher than the
+    # more negative of the two calibration crashes.
+    is_crash_like = (tail_val >= signature["tail_thresh"]) and (skew_val <= signature["skew_thresh"])
+
+    return {
+        "is_crash_like": bool(is_crash_like),
+        "score": float(score),
+        "tail_val": float(tail_val),
+        "skew_val": float(skew_val),
+        "tail_thresh": float(signature["tail_thresh"]),
+        "skew_thresh": float(signature["skew_thresh"]),
+    }
+
+
+def classify_crash_loose(summary, signature):
+    """
+    Legacy/looser rule: tail must be at least half the signature tail,
+    skew must be no higher than the signature skew.
+    """
+    tail_key = signature["tail_key"]
+    tail_val = summary[tail_key]
+    skew_val = summary["skew"]
+
+    tail_diff = abs(tail_val - signature["tail_thresh"])
+    skew_diff = abs(skew_val - signature["skew_thresh"])
+    score = tail_diff + skew_diff
+
     is_crash_like = (
-        (tail_val >= 0.5 * signature["tail_thresh"]) and  # enough left tail
-        (skew_val <= signature["skew_thresh"])            # at least as negatively skewed
+        (tail_val >= 0.5 * signature["tail_thresh"])
+        and (skew_val <= signature["skew_thresh"])
     )
 
     return {
@@ -200,14 +252,14 @@ def classify_crash_feature_space(summary, feature_signature, threshold=None, wei
     use_var = feature_signature.get("use_var", False)
     use_cvar = feature_signature.get("use_cvar", False)
     center = feature_signature["center"]
+    if threshold is None:
+        threshold = feature_signature.get("threshold")
 
     feats = compute_feature_vector(summary, tail_key, use_std, use_var, use_cvar)
     dist = feature_distance(feats, center, weights)
 
     # Heuristic threshold: if not provided, set to 2 * average distance of Crash1 & 2 from center
     if threshold is None:
-        # For the two building crashes, distance to center equals same value,
-        # but if you want you can pass threshold explicitly in the notebook.
-        threshold = 0.0  # placeholder, real value set in notebook
+        threshold = 0.0  # explicit default if none supplied
 
     return dist, dist <= threshold, feats

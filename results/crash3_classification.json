@@ -1,16 +1,18 @@
 {
-  "signature": {
-    "tail_key": "tail_prob_<-0.200",
-    "tail_thresh": 0.1886184695627973,
-    "skew_thresh": 0.6808825243355623
-  },
   "tested_crash_id": "Crash3",
-  "classification": {
-    "is_crash_like": false,
-    "score": 0.40116462609846204,
-    "tail_val": 0.24499190037809226,
-    "skew_val": 1.0256737196187293,
-    "tail_thresh": 0.1886184695627973,
-    "skew_thresh": 0.6808825243355623
+  "distance": 0.36652446294615904,
+  "threshold": 0.15597674721490087,
+  "is_crash_like": false,
+  "features": {
+    "tail": 0.24499190037809226,
+    "skew": 1.0256737196187293,
+    "std": 0.34559667004471784
+  },
+  "tail_key": "tail_prob_<-0.200",
+  "use_std": true,
+  "center": {
+    "tail": 0.1886184695627973,
+    "skew": 0.6808825243355623,
+    "std": 0.23477586923869406
   }
 }

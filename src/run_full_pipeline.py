@@ -34,7 +34,13 @@ from model_engine_day1_json import (
     run_tree_for_crash_row,
     write_summary_jsons,
 )
-from crash_signature import build_crash_signature, classify_crash, plot_crash_metrics
+from crash_signature import (
+    classify_crash_feature_space,
+    plot_crash_metrics,
+    compute_feature_vector,
+    feature_distance,
+    infer_tail_key,
+)
 from tree_plots import build_local_vol_lattice, plot_binomial_tree_lattice
 from summary_stats import compute_summary_stats
 import datetime as dt
@@ -45,6 +51,7 @@ PLOTS_DIR = BASE_DIR / "plots"
 P2_PLOTS = PLOTS_DIR / "person2"
 P3_PLOTS = PLOTS_DIR / "person3"
 VERIFICATION_FILE = RESULTS_DIR / "model_vs_realized.json"
+VERIFICATION_FEATURE_PLOT = PLOTS_DIR / "person3" / "model_vs_realized_tail_skew_kurt.png"
 CLASSIFICATION_FILE = RESULTS_DIR / "crash3_classification.json"
 PRECRASH_FILE = RESULTS_DIR / "crash3_precrash_predictions.json"
 VERIFICATION_PLOT = PLOTS_DIR / "model_vs_realized.png"
@@ -128,28 +135,50 @@ def run_person_c(
     results_dir: Path = RESULTS_DIR,
 ) -> Optional[Dict[str, Any]]:
     """
-    Build a crash signature from Crash1 & Crash2, then classify Crash3.
+    Build a feature-space signature from Crash1 & Crash2, then classify Crash3.
     """
     if len(summaries) < 3:
         print("Need at least three crashes to build and test a signature.")
         return None
 
-    signature = build_crash_signature(summaries[0], summaries[1])
-    classification = classify_crash(summaries[2], signature)
-    plot_person3_metrics(summaries)
-
-    payload = {
-        "signature": signature,
-        "tested_crash_id": summaries[2]["crash_id"],
-        "classification": classification,
+    tail_key = infer_tail_key(summaries[0])
+    # build feature vectors for crash1 and crash2
+    f1 = compute_feature_vector(summaries[0], tail_key, use_std=True)
+    f2 = compute_feature_vector(summaries[1], tail_key, use_std=True)
+    # center is the average of crash1 and crash2
+    center = {k: 0.5 * (f1[k] + f2[k]) for k in f1.keys()}
+    signature = {
+        "tail_key": tail_key,
+        "use_std": True,
+        "center": center,
     }
+    # threshold is the max distance of crash1/2 to the center so both calibrations are included
+    d1 = feature_distance(f1, center)
+    d2 = feature_distance(f2, center)
+    threshold = max(d1, d2)
+    dist, is_crash_like, feats3 = classify_crash_feature_space(
+        summaries[2], signature, threshold=threshold
+    )
+    classification = {
+        "tested_crash_id": summaries[2]["crash_id"],
+        "distance": float(dist),
+        "threshold": float(threshold),
+        "is_crash_like": bool(is_crash_like),
+        "features": feats3,
+        "tail_key": tail_key,
+        "use_std": True,
+        "center": center,
+    }
+
+    plot_person3_metrics(summaries)
 
     results_dir.mkdir(parents=True, exist_ok=True)
     with CLASSIFICATION_FILE.open("w") as f:
-        json.dump(payload, f, indent=2)
+        json.dump(classification, f, indent=2)
 
-    print(f"Crash {summaries[2]['crash_id']} classification saved to {CLASSIFICATION_FILE}")
-    return payload
+    print(f"Crash {summaries[2]['crash_id']} feature-space classification saved to {CLASSIFICATION_FILE}")
+
+    return classification
 
 
 def plot_person3_metrics(summaries: List[Dict[str, Any]], out_dir: Path = P3_PLOTS) -> Optional[Path]:
@@ -308,6 +337,7 @@ def compare_model_realized(
     realized: Dict[int, Dict[str, float]],
     out_path: Path = VERIFICATION_FILE,
     plot_path: Path = VERIFICATION_PLOT,
+    feature_plot_path: Path = VERIFICATION_FEATURE_PLOT,
 ) -> Optional[Path]:
     """
     Compare model vs realized metrics for each crash and write JSON.
@@ -317,32 +347,49 @@ def compare_model_realized(
 
     records = []
     plot_rows = []
+
+    def rel_err(model_val: float, real_val: float, floor: float = 1e-12) -> float:
+        denom = max(abs(real_val), floor)
+        return abs(model_val - real_val) / denom
+
     for s in summaries:
         cid = int(str(s["crash_id"]).replace("Crash", ""))
         real = realized.get(cid)
         if not real:
             continue
+        model_tail_key = [k for k in s.keys() if k.startswith("tail_prob_")][0]
+        model_tail = s[model_tail_key]
+        model_kurt = s.get("kurtosis")
+        real_kurt = real.get("kurt_ret")
         record = {
             "crash_id": s["crash_id"],
             "model": {
-                "tail_prob": s[[k for k in s.keys() if k.startswith("tail_prob_")][0]],
+                "tail_prob": model_tail,
                 "mean_ret": s["mean"],
                 "std_ret": s["std"],
                 "skew_ret": s["skew"],
-                "kurt_ret": s.get("kurtosis"),
+                "kurt_ret": model_kurt,
             },
             "realized": real,
+            "errors": {
+                "tail_prob_abs": abs(model_tail - real["tail_prob"]),
+                "tail_prob_pct": rel_err(model_tail, real["tail_prob"]),
+                "skew_abs": abs(s["skew"] - real["skew_ret"]),
+                "skew_pct": rel_err(s["skew"], real["skew_ret"]),
+                "kurt_abs": abs(model_kurt - real_kurt) if model_kurt is not None and real_kurt is not None else None,
+                "kurt_pct": rel_err(model_kurt, real_kurt) if model_kurt is not None and real_kurt is not None else None,
+            },
         }
         records.append(record)
         plot_rows.append(
             {
                 "crash": s["crash_id"],
-                "model_tail": record["model"]["tail_prob"],
-                "real_tail": real["tail_prob"],
                 "model_skew": record["model"]["skew_ret"],
                 "real_skew": real["skew_ret"],
                 "model_vol": record["model"]["std_ret"],
                 "real_vol": real["std_ret"],
+                "model_kurt": model_kurt,
+                "real_kurt": real_kurt,
             }
         )
 
@@ -358,25 +405,25 @@ def compare_model_realized(
         width = 0.35
         fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
-        # Tail prob
-        axes[0].bar(x - width / 2, df_plot["model_tail"], width, label="Model")
-        axes[0].bar(x + width / 2, df_plot["real_tail"], width, label="Realized")
-        axes[0].set_title("Tail prob (<0.8 S0)")
+        # Volatility (std)
+        axes[0].bar(x - width / 2, df_plot["model_vol"], width, label="Implied")
+        axes[0].bar(x + width / 2, df_plot["real_vol"], width, label="Realized")
+        axes[0].set_title("Volatility (std of returns)")
         axes[0].set_xticks(x)
         axes[0].set_xticklabels(df_plot["crash"])
         axes[0].legend()
 
         # Skew
-        axes[1].bar(x - width / 2, df_plot["model_skew"], width, label="Model")
+        axes[1].bar(x - width / 2, df_plot["model_skew"], width, label="Implied")
         axes[1].bar(x + width / 2, df_plot["real_skew"], width, label="Realized")
         axes[1].set_title("Skew (returns)")
         axes[1].set_xticks(x)
         axes[1].set_xticklabels(df_plot["crash"])
 
-        # Volatility (std)
-        axes[2].bar(x - width / 2, df_plot["model_vol"], width, label="Model")
-        axes[2].bar(x + width / 2, df_plot["real_vol"], width, label="Realized")
-        axes[2].set_title("Volatility (std of returns)")
+        # Kurtosis
+        axes[2].bar(x - width / 2, df_plot["model_kurt"], width, label="Implied")
+        axes[2].bar(x + width / 2, df_plot["real_kurt"], width, label="Realized")
+        axes[2].set_title("Kurtosis (returns)")
         axes[2].set_xticks(x)
         axes[2].set_xticklabels(df_plot["crash"])
 
@@ -385,6 +432,37 @@ def compare_model_realized(
         fig.savefig(plot_path, dpi=150)
         plt.close(fig)
         print(f"Wrote model vs realized plot to {plot_path}")
+
+    if plot_rows:
+        df_feat = pd.DataFrame(plot_rows)
+        x = np.arange(len(df_feat))
+        width = 0.35
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+        axes[0].bar(x - width / 2, df_feat["model_vol"], width, label="Implied")
+        axes[0].bar(x + width / 2, df_feat["real_vol"], width, label="Realized")
+        axes[0].set_title("Volatility (std of returns)")
+        axes[0].set_xticks(x)
+        axes[0].set_xticklabels(df_feat["crash"])
+        axes[0].legend()
+
+        axes[1].bar(x - width / 2, df_feat["model_skew"], width, label="Implied")
+        axes[1].bar(x + width / 2, df_feat["real_skew"], width, label="Realized")
+        axes[1].set_title("Skew (returns)")
+        axes[1].set_xticks(x)
+        axes[1].set_xticklabels(df_feat["crash"])
+
+        axes[2].bar(x - width / 2, df_feat["model_kurt"], width, label="Implied")
+        axes[2].bar(x + width / 2, df_feat["real_kurt"], width, label="Realized")
+        axes[2].set_title("Kurtosis (returns)")
+        axes[2].set_xticks(x)
+        axes[2].set_xticklabels(df_feat["crash"])
+
+        fig.tight_layout()
+        feature_plot_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(feature_plot_path, dpi=150)
+        plt.close(fig)
+        print(f"Wrote skew/vol/kurtosis comparison to {feature_plot_path}")
 
     return out_path
 
@@ -436,7 +514,19 @@ def pre_crash_prediction_metrics(
             }
         )
         metrics = run_tree_for_crash_row(pseudo_row)
-        classification = classify_crash(metrics, signature)
+        # classify using feature-space distance
+        threshold = signature.get("threshold")
+        dist, is_crash_like, feats = classify_crash_feature_space(
+            metrics,
+            signature,
+            threshold=threshold,
+        )
+        classification = {
+            "distance": float(dist),
+            "threshold": float(threshold) if threshold is not None else None,
+            "is_crash_like": bool(is_crash_like),
+            "features": feats,
+        }
         records.append(
             {
                 "date": date.strftime("%Y-%m-%d"),
@@ -477,18 +567,24 @@ def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     realized = compute_realized_window_stats()
     compare_model_realized(summaries, realized)
 
-    if classification and "signature" in classification:
-        print("Running pre-crash prediction metrics for Crash3 lookback window...")
-        precrash = pre_crash_prediction_metrics(classification["signature"])
-        plot_precrash_tail_skew()
-    else:
-        precrash = None
+    feature_signature = None
+    precrash_feature = None
+    if classification:
+        feature_signature = {
+            "tail_key": classification["tail_key"],
+            "use_std": classification.get("use_std", True),
+            "center": classification["center"],
+            "threshold": classification["threshold"],
+        }
+        print("Running pre-crash prediction metrics for Crash3 lookback window (feature-space signature)...")
+        precrash_feature = pre_crash_prediction_metrics(feature_signature, out_path=PRECRASH_FILE)
+        plot_precrash_tail_skew(precrash_file=PRECRASH_FILE)
 
     return {
         "summaries": summaries,
         "classification": classification,
         "realized": realized,
-        "precrash": precrash,
+        "precrash_feature": precrash_feature,
     }
 
 

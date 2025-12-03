@@ -29,7 +29,7 @@ computes summary stats, and writes a JSON file with entries like:
 """
 
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Tuple, Union
 from pathlib import Path
 
 import numpy as np
@@ -91,7 +91,7 @@ def make_local_vol_from_vix(
 def run_tree_for_crash_row(
     row: pd.Series,
     return_distribution: bool = False,
-) -> Dict[str, Any] | tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+) -> Union[Dict[str, Any], Tuple[np.ndarray, np.ndarray, Dict[str, Any]]]:
     """
     One crash row → terminal distribution → JSON-friendly dict.
     """
