@@ -48,6 +48,8 @@ VERIFICATION_FILE = RESULTS_DIR / "model_vs_realized.json"
 CLASSIFICATION_FILE = RESULTS_DIR / "crash3_classification.json"
 PRECRASH_FILE = RESULTS_DIR / "crash3_precrash_predictions.json"
 VERIFICATION_PLOT = PLOTS_DIR / "model_vs_realized.png"
+CRASH_VAR_CVAR_PLOT = PLOTS_DIR / "person3" / "crash_var_cvar.png"
+PRECRASH_PLOT = PLOTS_DIR / "person3" / "crash3_precrash_tail_skew.png"
 
 
 def run_person_a() -> None:
@@ -161,6 +163,100 @@ def plot_person3_metrics(summaries: List[Dict[str, Any]], out_dir: Path = P3_PLO
     save_path = out_dir / "crash_signature_metrics.png"
     plot_crash_metrics(summaries, names, save_path=save_path)
     return save_path
+
+
+def plot_crash_var_cvar(summaries: List[Dict[str, Any]], out_path: Path = CRASH_VAR_CVAR_PLOT) -> Optional[Path]:
+    """
+    Plot per-crash VaR and CVaR across crashes to compare severity.
+    """
+    if not summaries:
+        return None
+
+    var_key = None
+    cvar_key = None
+    # find keys case-insensitively
+    for k in summaries[0].keys():
+        lk = k.lower()
+        if lk.startswith("var_"):
+            var_key = k
+        if lk.startswith("cvar_"):
+            cvar_key = k
+    if not var_key or not cvar_key:
+        return None
+
+    names = [s["crash_id"] for s in summaries]
+    vars_ = [s[var_key] for s in summaries]
+    cvars = [s[cvar_key] for s in summaries]
+
+    x = np.arange(len(names))
+    width = 0.35
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    axes[0].bar(x, vars_, width, color="tab:blue")
+    axes[0].set_title(f"{var_key} (returns)")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(names)
+
+    axes[1].bar(x, cvars, width, color="tab:red")
+    axes[1].set_title(f"{cvar_key} (returns)")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(names)
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"Wrote crash VaR/CVaR comparison to {out_path}")
+    return out_path
+
+
+def plot_precrash_tail_skew(precrash_file: Path = PRECRASH_FILE, out_path: Path = PRECRASH_PLOT) -> Optional[Path]:
+    """
+    Plot tail_prob and skew over the pre-crash window to see trends leading
+    up to Crash3.
+    """
+    if not precrash_file.exists():
+        return None
+    with precrash_file.open("r") as f:
+        data = json.load(f)
+    if not data:
+        return None
+
+    dates = [pd.to_datetime(d["date"]) for d in data]
+    tail_vals = []
+    skew_vals = []
+    tail_keys = []
+    for d in data:
+        metrics = d.get("model_metrics", {})
+        if not tail_keys:
+            tail_keys = [k for k in metrics.keys() if k.startswith("tail_prob_")]
+        tail_key = tail_keys[0] if tail_keys else None
+        tail_vals.append(metrics.get(tail_key, np.nan))
+        skew_vals.append(metrics.get("skew", np.nan))
+
+    fig, ax1 = plt.subplots(figsize=(10, 4))
+    ax2 = ax1.twinx()
+
+    ax1.plot(dates, tail_vals, marker="o", color="tab:blue", label="Tail prob")
+    ax2.plot(dates, skew_vals, marker="s", color="tab:red", label="Skew")
+
+    ax1.set_ylabel("Tail prob", color="tab:blue")
+    ax2.set_ylabel("Skew", color="tab:red")
+    ax1.set_xlabel("Date")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+    ax1.set_title("Pre-crash tail prob and skew (Crash3 lookback)")
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"Wrote pre-crash tail/skew plot to {out_path}")
+    return out_path
 
 
 def compute_realized_window_stats(
@@ -374,6 +470,9 @@ def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     print("Running Person C pipeline (signature + classification)...")
     classification = run_person_c(summaries)
 
+    print("Plotting crash-to-crash VaR/CVaR comparison...")
+    plot_crash_var_cvar(summaries)
+
     print("Running model vs realized verification (VaR/CVaR, tail)...")
     realized = compute_realized_window_stats()
     compare_model_realized(summaries, realized)
@@ -381,6 +480,7 @@ def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     if classification and "signature" in classification:
         print("Running pre-crash prediction metrics for Crash3 lookback window...")
         precrash = pre_crash_prediction_metrics(classification["signature"])
+        plot_precrash_tail_skew()
     else:
         precrash = None
 
