@@ -39,7 +39,7 @@ CRASH_VOL_FILE = os.path.join(DATA_DIR, "crash_vol_inputs.csv")
 PLOT_DIR = "plots_binomial"
 os.makedirs(PLOT_DIR, exist_ok=True)
 
-DEFAULT_N_STEPS = 8
+DEFAULT_N_STEPS = 25
 DEFAULT_R = 0.0
 SIGMA_FLOOR = 0.01
 SIGMA_CAP = 2.0

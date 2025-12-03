@@ -160,7 +160,7 @@ def infer_tail_key(summary_dict):
     return tail_keys[0]
 
 
-def compute_feature_vector(summary, tail_key=None, use_std=True):
+def compute_feature_vector(summary, tail_key=None, use_std=True, use_var=False, use_cvar=False):
     if tail_key is None:
         tail_key = infer_tail_key(summary)
     feats = {
@@ -169,6 +169,15 @@ def compute_feature_vector(summary, tail_key=None, use_std=True):
     }
     if use_std:
         feats["std"] = summary["std"]
+    if use_var:
+        # use VaR if present
+        var_keys = [k for k in summary.keys() if k.lower().startswith("var_")]
+        if var_keys:
+            feats["var"] = summary[var_keys[0]]
+    if use_cvar:
+        cvar_keys = [k for k in summary.keys() if k.lower().startswith("cvar_")]
+        if cvar_keys:
+            feats["cvar"] = summary[cvar_keys[0]]
     return feats
 
 def feature_distance(feats, center, weights=None):
@@ -188,9 +197,11 @@ def feature_distance(feats, center, weights=None):
 def classify_crash_feature_space(summary, feature_signature, threshold=None, weights=None):
     tail_key = feature_signature["tail_key"]
     use_std = feature_signature["use_std"]
+    use_var = feature_signature.get("use_var", False)
+    use_cvar = feature_signature.get("use_cvar", False)
     center = feature_signature["center"]
 
-    feats = compute_feature_vector(summary, tail_key, use_std)
+    feats = compute_feature_vector(summary, tail_key, use_std, use_var, use_cvar)
     dist = feature_distance(feats, center, weights)
 
     # Heuristic threshold: if not provided, set to 2 * average distance of Crash1 & 2 from center

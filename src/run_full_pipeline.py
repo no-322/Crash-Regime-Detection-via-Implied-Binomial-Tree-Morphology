@@ -27,18 +27,23 @@ from model_engine_day1_json import (
     JSON_DIR,
     M_MAX,
     M_MIN,
+    DEFAULT_R,
+    DEFAULT_N_STEPS,
     generate_crash_summaries,
     make_local_vol_from_vix,
     run_tree_for_crash_row,
     write_summary_jsons,
 )
 from crash_signature import build_crash_signature, classify_crash, plot_crash_metrics
+from tree_plots import build_local_vol_lattice, plot_binomial_tree_lattice
+from summary_stats import compute_summary_stats
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 RESULTS_DIR = BASE_DIR / "results"
 PLOTS_DIR = BASE_DIR / "plots"
 P2_PLOTS = PLOTS_DIR / "person2"
 P3_PLOTS = PLOTS_DIR / "person3"
+VERIFICATION_FILE = RESULTS_DIR / "model_vs_realized.json"
 CLASSIFICATION_FILE = RESULTS_DIR / "crash3_classification.json"
 
 
@@ -101,6 +106,14 @@ def plot_person2_outputs(crash_vol_path: Path = CRASH_VOL_FILE, out_dir: Path = 
         fig.savefig(out_dir / f"crash{crash_id}_terminal.png", dpi=150)
         plt.close(fig)
 
+        # Lattice plot
+        lattice = build_local_vol_lattice(
+            S0, DEFAULT_R, T_years, DEFAULT_N_STEPS, sigma_of_m
+        )
+        plot_binomial_tree_lattice(
+            lattice, S0, out_path=str(out_dir / f"crash{crash_id}_lattice.png")
+        )
+
 
 def run_person_c(
     summaries: List[Dict[str, Any]],
@@ -144,6 +157,89 @@ def plot_person3_metrics(summaries: List[Dict[str, Any]], out_dir: Path = P3_PLO
     return save_path
 
 
+def compute_realized_window_stats(
+    horizon_days: int = 30,
+    var_alpha: float = 0.05,
+) -> Dict[int, Dict[str, float]]:
+    """
+    For each crash in crash_meta.csv, compute realized returns over a window
+    after the crash date and report tail prob, mean/std/skew/kurt, VaR/CVaR.
+    """
+    spy_file = BASE_DIR / "data" / "spy_vix_full.csv"
+    meta_file = BASE_DIR / "data" / "crash_meta.csv"
+    if not spy_file.exists() or not meta_file.exists():
+        return {}
+
+    spy = pd.read_csv(spy_file, parse_dates=["Date"])
+    meta = pd.read_csv(meta_file, parse_dates=["crash_date"])
+    spy = spy.sort_values("Date").set_index("Date")
+
+    realized: Dict[int, Dict[str, float]] = {}
+    for _, row in meta.iterrows():
+        cid = int(row["crash_id"])
+        crash_date = row["crash_date"]
+        S0 = float(row["S0"])
+
+        window = spy.loc[crash_date:].iloc[1 : horizon_days + 1].copy()
+        if window.empty:
+            continue
+
+        S_T = window["SPY_close"].to_numpy(dtype=float)
+        probs = np.ones_like(S_T, dtype=float) / len(S_T)
+        stats = compute_summary_stats(S_T, probs, S0=S0, tail_m=0.8, var_alpha=var_alpha)
+        realized[cid] = {
+            "tail_prob": stats["tail_prob"],
+            "mean_ret": stats["mean_ret"],
+            "std_ret": stats["std_ret"],
+            "skew_ret": stats["skew_ret"],
+            "kurt_ret": stats["kurt_ret"],
+            "var_ret": stats["var_ret"],
+            "cvar_ret": stats["cvar_ret"],
+            "var_alpha": stats["var_alpha"],
+            "window_days": horizon_days,
+        }
+    return realized
+
+
+def compare_model_realized(
+    summaries: List[Dict[str, Any]],
+    realized: Dict[int, Dict[str, float]],
+    out_path: Path = VERIFICATION_FILE,
+) -> Optional[Path]:
+    """
+    Compare model vs realized metrics for each crash and write JSON.
+    """
+    if not summaries or not realized:
+        return None
+
+    records = []
+    for s in summaries:
+        cid = int(str(s["crash_id"]).replace("Crash", ""))
+        real = realized.get(cid)
+        if not real:
+            continue
+        record = {
+            "crash_id": s["crash_id"],
+            "model": {
+                "tail_prob": s[[k for k in s.keys() if k.startswith("tail_prob_")][0]],
+                "mean_ret": s["mean"],
+                "std_ret": s["std"],
+                "skew_ret": s["skew"],
+                "kurt_ret": s.get("kurtosis"),
+                "var_ret": s.get("VaR_5pct"),
+                "cvar_ret": s.get("CVaR_5pct"),
+            },
+            "realized": real,
+        }
+        records.append(record)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w") as f:
+        json.dump(records, f, indent=2)
+    print(f"Wrote model vs realized verification to {out_path}")
+    return out_path
+
+
 def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     """
     Run the full chain. By default Person A is skipped because it downloads
@@ -160,7 +256,11 @@ def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     print("Running Person C pipeline (signature + classification)...")
     classification = run_person_c(summaries)
 
-    return {"summaries": summaries, "classification": classification}
+    print("Running model vs realized verification (VaR/CVaR, tail)...")
+    realized = compute_realized_window_stats()
+    compare_model_realized(summaries, realized)
+
+    return {"summaries": summaries, "classification": classification, "realized": realized}
 
 
 if __name__ == "__main__":

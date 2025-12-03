@@ -29,6 +29,7 @@ def compute_summary_stats(
     probs: np.ndarray,
     S0: float,
     tail_m: float = 0.8,
+    var_alpha: float = 0.05,
 ) -> Dict[str, float]:
     """
     Compute summary statistics on returns R_T = S_T / S0 - 1.
@@ -44,6 +45,8 @@ def compute_summary_stats(
     tail_m : float, optional
         Tail threshold as a multiple of S0 (default 0.8). Internally this
         maps to a return threshold of (tail_m - 1), e.g. -0.2 for tail_m=0.8.
+    var_alpha : float, optional
+        Confidence level for VaR / CVaR on returns (default 5%).
 
     Returns
     -------
@@ -58,6 +61,8 @@ def compute_summary_stats(
             - 'skew_ret'
             - 'kurt_ret'
             - 'excess_kurt_ret'
+            - 'var_ret' (VaR at var_alpha)
+            - 'cvar_ret' (CVaR / expected shortfall at var_alpha)
     """
     S_T = np.asarray(S_T, dtype=float).ravel()
     probs = np.asarray(probs, dtype=float).ravel()
@@ -97,6 +102,23 @@ def compute_summary_stats(
         kurt_ret = np.nan
         excess_kurt_ret = np.nan
 
+    # VaR / CVaR on returns
+    sort_idx = np.argsort(returns)
+    ret_sorted = returns[sort_idx]
+    prob_sorted = probs[sort_idx]
+    cum_prob = np.cumsum(prob_sorted)
+    var_index = np.searchsorted(cum_prob, var_alpha, side="left")
+    var_index = min(var_index, len(ret_sorted) - 1)
+    var_ret = float(ret_sorted[var_index])
+
+    tail_prob_var = float(cum_prob[var_index])
+    tail_mask = cum_prob <= var_alpha
+    tail_mass = float(prob_sorted[tail_mask].sum())
+    if tail_mass > 0:
+        cvar_ret = float(np.sum(prob_sorted[tail_mask] * ret_sorted[tail_mask]) / tail_mass)
+    else:
+        cvar_ret = var_ret
+
     stats = {
         "S0": float(S0),
         "tail_return_threshold": tail_return_threshold,
@@ -107,5 +129,8 @@ def compute_summary_stats(
         "skew_ret": skew_ret,
         "kurt_ret": kurt_ret,
         "excess_kurt_ret": excess_kurt_ret,
+        "var_alpha": float(var_alpha),
+        "var_ret": var_ret,
+        "cvar_ret": cvar_ret,
     }
     return stats

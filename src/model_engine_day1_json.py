@@ -48,7 +48,7 @@ JSON_DIR = BASE_DIR / "results"
 CRASH_VOL_FILE = DATA_DIR / "crash_vol_inputs.csv"
 JSON_OUT_FILE = JSON_DIR / "crash_stats_day1.json"
 
-DEFAULT_N_STEPS = 8     # non-recombining ⇒ keep small
+DEFAULT_N_STEPS = 10     # non-recombining ⇒ keep small
 DEFAULT_R = 0.0         # short rate for ~30 days
 TAIL_M = 0.8            # tail threshold multiple
 SIGMA_FLOOR = 0.01
@@ -117,6 +117,8 @@ def run_tree_for_crash_row(
         "skew": float(stats["skew_ret"]),
         "kurtosis": float(stats.get("kurt_ret", np.nan)),
         tail_key: float(stats["tail_prob"]),
+        f"VaR_{int(stats['var_alpha']*100)}pct": float(stats["var_ret"]),
+        f"CVaR_{int(stats['var_alpha']*100)}pct": float(stats["cvar_ret"]),
     }
     if return_distribution:
         return S_T, probs, out
