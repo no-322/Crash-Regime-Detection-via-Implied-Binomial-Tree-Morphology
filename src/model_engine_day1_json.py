@@ -28,9 +28,9 @@ computes summary stats, and writes a JSON file with entries like:
 }
 """
 
-import os
 import json
 from typing import Dict, Any
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -43,10 +43,10 @@ from summary_stats import compute_summary_stats
 # ---------- paths & constants ----------
 BASE_DIR = Path(__file__).resolve().parents[1]
 
-DATA_DIR = BASE_DIR / "data" 
-JSON_DIR = BASE_DIR / "results" 
-CRASH_VOL_FILE = os.path.join(DATA_DIR, "crash_vol_inputs.csv")
-JSON_OUT_FILE = os.path.join(JSON_DIR, "crash_stats_day1.json")
+DATA_DIR = BASE_DIR / "data"
+JSON_DIR = BASE_DIR / "results"
+CRASH_VOL_FILE = DATA_DIR / "crash_vol_inputs.csv"
+JSON_OUT_FILE = JSON_DIR / "crash_stats_day1.json"
 
 DEFAULT_N_STEPS = 8     # non-recombining ⇒ keep small
 DEFAULT_R = 0.0         # short rate for ~30 days
@@ -88,7 +88,10 @@ def make_local_vol_from_vix(
     return sigma_of_m
 
 
-def run_tree_for_crash_row(row: pd.Series) -> Dict[str, Any]:
+def run_tree_for_crash_row(
+    row: pd.Series,
+    return_distribution: bool = False,
+) -> Dict[str, Any] | tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
     One crash row → terminal distribution → JSON-friendly dict.
     """
@@ -103,39 +106,67 @@ def run_tree_for_crash_row(row: pd.Series) -> Dict[str, Any]:
 
     stats = compute_summary_stats(S_T, probs, S0=S0, tail_m=TAIL_M)
 
+    tail_key = f"tail_prob_<{stats['tail_return_threshold']:.3f}"
     out: Dict[str, Any] = {
         # string like "Crash1" to match your example
         "crash_id": f"Crash{int(row['crash_id'])}",
         "S0": S0,
         "T_years": T_years,
-        "mean": float(stats["mean_ST"]),
-        "std": float(stats["std_ST"]),
-        "skew": float(stats["skew_ST"]),
-        "kurtosis": float(stats.get("kurt_ST", np.nan)),
-        "tail_prob_<0.8S0": float(stats["tail_prob"]),
+        "mean": float(stats["mean_ret"]),
+        "std": float(stats["std_ret"]),
+        "skew": float(stats["skew_ret"]),
+        "kurtosis": float(stats.get("kurt_ret", np.nan)),
+        tail_key: float(stats["tail_prob"]),
     }
+    if return_distribution:
+        return S_T, probs, out
     return out
 
 
-def main():
-    if not os.path.exists(CRASH_VOL_FILE):
+def generate_crash_summaries(crash_vol_file: Path = CRASH_VOL_FILE) -> list[Dict[str, Any]]:
+    """
+    Read crash_vol_inputs.csv and compute summary stats for every crash.
+    """
+    crash_vol_file = Path(crash_vol_file)
+    if not crash_vol_file.exists():
         raise FileNotFoundError(
-            f"{CRASH_VOL_FILE} not found. Run crash_vix_pipeline.py first."
+            f"{crash_vol_file} not found. Run crash_vix_pipeline.py first."
         )
 
-    df = pd.read_csv(CRASH_VOL_FILE)
-
-    results = []
+    df = pd.read_csv(crash_vol_file)
+    results: list[Dict[str, Any]] = []
     for _, row in df.iterrows():
         results.append(run_tree_for_crash_row(row))
+    return results
 
-    # write pretty JSON list: [ {...}, {...}, {...} ]
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(JSON_OUT_FILE, "w") as f:
-        json.dump(results, f, indent=2)
 
-    print(f"Wrote {len(results)} crash records to {JSON_OUT_FILE}")
-    print(json.dumps(results, indent=2))  # optional echo to console
+def write_summary_jsons(
+    summaries: list[Dict[str, Any]],
+    json_dir: Path = JSON_DIR,
+    aggregate_path: Path = JSON_OUT_FILE,
+) -> None:
+    """
+    Persist both the aggregate list and per-crash JSON files.
+    """
+    json_dir.mkdir(parents=True, exist_ok=True)
+
+    if aggregate_path is not None:
+        with Path(aggregate_path).open("w") as f:
+            json.dump(summaries, f, indent=2)
+
+    for summary in summaries:
+        crash_id = summary["crash_id"]
+        per_file = json_dir / f"{crash_id}_summary.json"
+        with per_file.open("w") as f:
+            json.dump(summary, f, indent=2)
+
+
+def main():
+    summaries = generate_crash_summaries()
+    write_summary_jsons(summaries)
+
+    print(f"Wrote {len(summaries)} crash records to {JSON_DIR}")
+    print(json.dumps(summaries, indent=2))
 
 
 if __name__ == "__main__":

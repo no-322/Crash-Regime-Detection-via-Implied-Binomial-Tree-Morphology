@@ -93,7 +93,7 @@ def classify_crash(summary, signature):
         "skew_thresh": float(signature["skew_thresh"]),
     }
 
-def plot_crash_metrics(summaries, names, tail_key=None):
+def plot_crash_metrics(summaries, names, tail_key=None, save_path=None):
     if tail_key is None:
         tail_keys = [k for k in summaries[0].keys() if k.startswith("tail_prob_<")]
         if len(tail_keys) != 1:
@@ -121,7 +121,12 @@ def plot_crash_metrics(summaries, names, tail_key=None):
     ax1.legend(l1 + l2, lab1 + lab2, loc="upper right")
 
     plt.title("Crash metrics comparison")
-    plt.show()
+    fig.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=150)
+        plt.close(fig)
+    else:
+        plt.show()
 
 # crash_signature.py
 

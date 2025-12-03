@@ -13,9 +13,10 @@ Created on Sun Nov 30 22:35:56 2025
 """
 Summary statistics for terminal distributions from the implied tree.
 
-Day 1 goal for Person 2:
-- Given a discrete terminal distribution (S_T, probs) and spot S0,
-  compute tail probabilities, moments, skew, kurtosis, etc.
+Now we compute statistics on returns rather than prices:
+    R_T = S_T / S0 - 1
+Tail probability is defined on returns via the same tail_m input
+(e.g., tail_m=0.8 → tail return threshold = -0.2).
 """
 
 
@@ -30,7 +31,7 @@ def compute_summary_stats(
     tail_m: float = 0.8,
 ) -> Dict[str, float]:
     """
-    Compute summary statistics for a discrete terminal distribution.
+    Compute summary statistics on returns R_T = S_T / S0 - 1.
 
     Parameters
     ----------
@@ -41,21 +42,22 @@ def compute_summary_stats(
     S0 : float
         Spot / initial underlying price.
     tail_m : float, optional
-        Tail threshold as a multiple of S0 (default 0.8).
+        Tail threshold as a multiple of S0 (default 0.8). Internally this
+        maps to a return threshold of (tail_m - 1), e.g. -0.2 for tail_m=0.8.
 
     Returns
     -------
     stats : dict
         Dictionary with keys:
             - 'S0'
-            - 'tail_threshold'
-            - 'tail_prob'
-            - 'mean_ST'
-            - 'var_ST'
-            - 'std_ST'
-            - 'skew_ST'
-            - 'kurt_ST'
-            - 'excess_kurt_ST'
+            - 'tail_return_threshold'
+            - 'tail_prob'  (on returns)
+            - 'mean_ret'
+            - 'var_ret'
+            - 'std_ret'
+            - 'skew_ret'
+            - 'kurt_ret'
+            - 'excess_kurt_ret'
     """
     S_T = np.asarray(S_T, dtype=float).ravel()
     probs = np.asarray(probs, dtype=float).ravel()
@@ -72,35 +74,38 @@ def compute_summary_stats(
         raise ValueError("Total probability must be positive.")
     probs = probs / total_prob
 
-    # Tail probability
-    tail_threshold = float(tail_m * S0)
-    tail_mask = S_T < tail_threshold
+    # Compute returns
+    returns = S_T / float(S0) - 1.0
+
+    # Tail probability on returns
+    tail_return_threshold = float(tail_m - 1.0)
+    tail_mask = returns < tail_return_threshold
     tail_prob = float(probs[tail_mask].sum())
 
-    # Moments
-    mean_ST = float(np.sum(S_T * probs))
-    var_ST = float(np.sum(probs * (S_T - mean_ST) ** 2))
-    std_ST = float(np.sqrt(var_ST))
+    # Moments on returns
+    mean_ret = float(np.sum(returns * probs))
+    var_ret = float(np.sum(probs * (returns - mean_ret) ** 2))
+    std_ret = float(np.sqrt(var_ret))
 
-    if std_ST > 0:
-        z = (S_T - mean_ST) / std_ST
-        skew_ST = float(np.sum(probs * z ** 3))
-        kurt_ST = float(np.sum(probs * z ** 4))
-        excess_kurt_ST = float(kurt_ST - 3.0)
+    if std_ret > 0:
+        z = (returns - mean_ret) / std_ret
+        skew_ret = float(np.sum(probs * z ** 3))
+        kurt_ret = float(np.sum(probs * z ** 4))
+        excess_kurt_ret = float(kurt_ret - 3.0)
     else:
-        skew_ST = np.nan
-        kurt_ST = np.nan
-        excess_kurt_ST = np.nan
+        skew_ret = np.nan
+        kurt_ret = np.nan
+        excess_kurt_ret = np.nan
 
     stats = {
         "S0": float(S0),
-        "tail_threshold": tail_threshold,
+        "tail_return_threshold": tail_return_threshold,
         "tail_prob": tail_prob,
-        "mean_ST": mean_ST,
-        "var_ST": var_ST,
-        "std_ST": std_ST,
-        "skew_ST": skew_ST,
-        "kurt_ST": kurt_ST,
-        "excess_kurt_ST": excess_kurt_ST,
+        "mean_ret": mean_ret,
+        "var_ret": var_ret,
+        "std_ret": std_ret,
+        "skew_ret": skew_ret,
+        "kurt_ret": kurt_ret,
+        "excess_kurt_ret": excess_kurt_ret,
     }
     return stats

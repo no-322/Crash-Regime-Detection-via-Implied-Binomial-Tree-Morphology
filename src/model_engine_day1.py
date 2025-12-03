@@ -19,6 +19,7 @@ and is designed to be compatible with Person 1's output file
 
 
 from typing import Tuple, Dict
+from pathlib import Path
 
 import os
 import numpy as np
@@ -30,8 +31,9 @@ from summary_stats import compute_summary_stats
 
 
 # ---------------- USER PARAMETERS ----------------
-DATA_DIR = "/Users/atharva/Documents/Boston University/Semester 1/MF702 Fundamentals of Finance/Project/P2D1"
-CRASH_VOL_FILE = os.path.join(DATA_DIR, "crash_vol_inputs.csv")
+BASE_DIR = Path(__file__).resolve().parents[1]
+DATA_DIR = BASE_DIR / "data"
+CRASH_VOL_FILE = DATA_DIR / "crash_vol_inputs.csv"
 
 # Non-recombining tree: N must be quite small (e.g. 8–10), since complexity is O(2^N)
 DEFAULT_N_STEPS = 8

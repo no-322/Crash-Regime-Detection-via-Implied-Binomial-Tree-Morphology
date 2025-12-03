@@ -11,17 +11,17 @@ Created on Sun Nov 30 21:39:31 2025
 from __future__ import annotations
 from typing import Callable, Iterable
 import numpy as np
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import InterpolatedUnivariateSpline
 import matplotlib.pyplot as plt
 
 
 def fit_iv_spline(
     m_points: Iterable[float],
     iv_points: Iterable[float],
-    bc_type: str = "natural",
-) -> CubicSpline:
+    spline_degree: int = 2,
+) -> InterpolatedUnivariateSpline:
     """
-    Fit a cubic spline implied volatility smile sigma(m).
+    Fit a spline implied volatility smile sigma(m).
 
     Parameters
     ----------
@@ -29,13 +29,12 @@ def fit_iv_spline(
         Grid of moneyness values (e.g. K/S0 or S/S0) in ascending order.
     iv_points : iterable of float
         Implied volatilities corresponding to m_points.
-    bc_type : str, optional
-        Boundary condition type passed to scipy.interpolate.CubicSpline.
-        Common choices: "natural", "clamped". Default is "natural".
+    spline_degree : int, optional
+        Degree of the spline; we default to 2 (quadratic) per request.
 
     Returns
     -------
-    CubicSpline
+    InterpolatedUnivariateSpline
         A callable spline object sigma(m) that maps moneyness to IV.
     """
     m_arr = np.asarray(m_points, dtype=float)
@@ -51,18 +50,18 @@ def fit_iv_spline(
     m_sorted = m_arr[sort_idx]
     iv_sorted = iv_arr[sort_idx]
 
-    spline = CubicSpline(m_sorted, iv_sorted, bc_type=bc_type)
+    spline = InterpolatedUnivariateSpline(m_sorted, iv_sorted, k=spline_degree)
     return spline
 
 
-def build_dummy_smile() -> CubicSpline:
+def build_dummy_smile() -> InterpolatedUnivariateSpline:
     """
     Convenience helper for your Day 1 dummy data.
 
     Returns
     -------
-    CubicSpline
-        Spline for m = [0.8,0.9,1.0,1.1,1.2], iv = [0.35,0.30,0.25,0.28,0.32]
+    InterpolatedUnivariateSpline
+        Quadratic spline for m = [0.8,0.9,1.0,1.1,1.2], iv = [0.35,0.30,0.25,0.28,0.32]
     """
     m = np.array([0.8, 0.9, 1.0, 1.1, 1.2])
     iv = np.array([0.35, 0.30, 0.25, 0.28, 0.32])
@@ -70,7 +69,7 @@ def build_dummy_smile() -> CubicSpline:
 
 def plot_dummy_smile(num_points: int = 200) -> None:
     """
-    Plot the cubic-spline IV smile for the Day 1 dummy data.
+    Plot the quadratic-spline IV smile for the Day 1 dummy data.
     """
     # build the spline
     sigma = build_dummy_smile()
@@ -85,11 +84,11 @@ def plot_dummy_smile(num_points: int = 200) -> None:
 
     # plot
     plt.figure()
-    plt.plot(m_grid, iv_grid, label="Cubic-spline IV smile")
+    plt.plot(m_grid, iv_grid, label="Quadratic-spline IV smile")
     plt.scatter(m_nodes, iv_nodes, marker="o", label="Input points")
     plt.xlabel("Moneyness  m = K / S0")
     plt.ylabel("Implied volatility")
-    plt.title("Dummy IV Smile (Cubic Spline)")
+    plt.title("Dummy IV Smile (Quadratic Spline)")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
