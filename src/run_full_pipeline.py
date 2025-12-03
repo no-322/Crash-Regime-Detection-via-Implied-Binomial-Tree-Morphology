@@ -37,6 +37,7 @@ from model_engine_day1_json import (
 from crash_signature import build_crash_signature, classify_crash, plot_crash_metrics
 from tree_plots import build_local_vol_lattice, plot_binomial_tree_lattice
 from summary_stats import compute_summary_stats
+import datetime as dt
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 RESULTS_DIR = BASE_DIR / "results"
@@ -45,6 +46,7 @@ P2_PLOTS = PLOTS_DIR / "person2"
 P3_PLOTS = PLOTS_DIR / "person3"
 VERIFICATION_FILE = RESULTS_DIR / "model_vs_realized.json"
 CLASSIFICATION_FILE = RESULTS_DIR / "crash3_classification.json"
+PRECRASH_FILE = RESULTS_DIR / "crash3_precrash_predictions.json"
 
 
 def run_person_a() -> None:
@@ -240,6 +242,71 @@ def compare_model_realized(
     return out_path
 
 
+def pre_crash_prediction_metrics(
+    signature: Dict[str, Any],
+    lookback_days: int = 7,
+    horizon_days: int = 30,
+    out_path: Path = PRECRASH_FILE,
+) -> Optional[Path]:
+    """
+    For the latest crash (Crash3), compute model metrics for each trading day
+    in the week leading up to the crash date and classify them with the
+    existing signature. Intended to see if the signature would have flagged
+    the crash ahead of time.
+    """
+    spy_file = BASE_DIR / "data" / "spy_vix_full.csv"
+    meta_file = BASE_DIR / "data" / "crash_meta.csv"
+    if not spy_file.exists() or not meta_file.exists():
+        return None
+
+    spy = pd.read_csv(spy_file, parse_dates=["Date"])
+    meta = pd.read_csv(meta_file, parse_dates=["crash_date"])
+    spy = spy.sort_values("Date").set_index("Date")
+    meta = meta.sort_values("crash_date")
+
+    # Take the latest crash (chronological ordering assumed)
+    crash3_row = meta.iloc[-1]
+    crash_date = crash3_row["crash_date"]
+
+    window_mask = (spy.index >= crash_date - pd.Timedelta(days=lookback_days)) & (
+        spy.index < crash_date
+    )
+    window_df = spy.loc[window_mask].copy()
+    if window_df.empty:
+        return None
+
+    records = []
+    for i, (date, row) in enumerate(window_df.iterrows(), start=1):
+        S0 = float(row["SPY_close"])
+        vix = float(row["VIX_close"])
+        # Create a minimal Series for run_tree_for_crash_row
+        pseudo_row = pd.Series(
+            {
+                "crash_id": 300 + i,  # dummy id for labeling
+                "S0": S0,
+                "T_years": horizon_days / 252,
+                "sigma_atm_from_VIX": vix / 100.0,
+            }
+        )
+        metrics = run_tree_for_crash_row(pseudo_row)
+        classification = classify_crash(metrics, signature)
+        records.append(
+            {
+                "date": date.strftime("%Y-%m-%d"),
+                "spy_close": S0,
+                "vix_close": vix,
+                "model_metrics": metrics,
+                "classification": classification,
+            }
+        )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w") as f:
+        json.dump(records, f, indent=2)
+    print(f"Wrote pre-crash prediction metrics to {out_path}")
+    return out_path
+
+
 def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     """
     Run the full chain. By default Person A is skipped because it downloads
@@ -260,7 +327,18 @@ def run_full_pipeline(include_person_a: bool = False) -> Dict[str, Any]:
     realized = compute_realized_window_stats()
     compare_model_realized(summaries, realized)
 
-    return {"summaries": summaries, "classification": classification, "realized": realized}
+    if classification and "signature" in classification:
+        print("Running pre-crash prediction metrics for Crash3 lookback window...")
+        precrash = pre_crash_prediction_metrics(classification["signature"])
+    else:
+        precrash = None
+
+    return {
+        "summaries": summaries,
+        "classification": classification,
+        "realized": realized,
+        "precrash": precrash,
+    }
 
 
 if __name__ == "__main__":
