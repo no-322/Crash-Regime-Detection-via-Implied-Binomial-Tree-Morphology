@@ -1,3 +1,3 @@
-Crash 1 on 2020-03-16: SPY drop=220.44, VIX spike=82.69
-Crash 2 on 2008-10-15: SPY drop=65.67, VIX spike=69.25
-Crash 3 on 2011-08-08: SPY drop=86.94, VIX spike=48.00
+Crash 1 on 2008-10-15: SPY drop=65.67, VIX spike=69.25
+Crash 2 on 2011-08-08: SPY drop=86.94, VIX spike=48.00
+Crash 3 on 2020-03-16: SPY drop=220.44, VIX spike=82.69

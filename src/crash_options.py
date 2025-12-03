@@ -91,7 +91,8 @@ def main():
     crashes_df = full_df.dropna(subset=['SPY_ret']).sort_values('SPY_ret')
     crashes = select_diverse_crashes(crashes_df, TOP_N_CRASHES)
 
-    # Build crash_meta.csv
+    # Build crash_meta.csv (chronological crash_id: earliest -> latest)
+    crashes = sorted(crashes, key=lambda x: x[0])  # sort by crash_date
     meta_rows = []
     for i, (crash_date, row) in enumerate(crashes, start=1):
         pre_vix = full_df['VIX_close'].loc[:crash_date].tail(PRE_CRASH_WINDOW).mean()
@@ -120,6 +121,7 @@ def main():
         T_years = 30/252  # 30 trading days horizon
         vol_inputs.append({
             "crash_id": row['crash_id'],
+            "crash_date": row['crash_date'],
             "S0": row['S0'],
             "T_years": T_years,
             "sigma_atm_from_VIX": sigma_atm,
